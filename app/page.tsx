@@ -33,8 +33,9 @@ const ERC20_ABI = [
 // Contracts
 const NFT_CONTRACT = "0x94475C04c5413c9FE532675fB921fC8b9a24475b";
 const ERC20_CONTRACT = "0xF58E363B23fC1BA88f8F75A6EAB57cF6ecaFae05";
-const PROJECT_ADDRESS = "0xEEfa0c1605562B4Aa419821204836Aa1826775D4";
+const PROJECT_ADDRESS = "0x81Dc669847E8e9Db863bf114a1481A49e5B4940D";
 const MONAD_RPC = "https://testnet-rpc.monad.xyz";
+const monadProvider = new ethers.JsonRpcProvider(MONAD_RPC);
 
 export default function Page() {
   const [account, setAccount] = useState<string | null>(null);
@@ -127,11 +128,10 @@ export default function Page() {
 
   async function sendMonad() {
     if (!account) return alert('Connect wallet first');
-    if (!window.ethereum) return alert('Ethereum provider not found');
 
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
+      const provider = new ethers.JsonRpcProvider(MONAD_RPC);
+      const signer = await provider.getSigner(account);
 
       const tx = await signer.sendTransaction({
         to: PROJECT_ADDRESS,
@@ -180,27 +180,37 @@ export default function Page() {
     }
   }
 
+
+
+
+
   async function connectWallet() {
     const detectedProvider = await detectEthereumProvider();
-
     if (!detectedProvider) {
-      if (onboarding) onboarding.startOnboarding();
+      onboarding?.startOnboarding();
       return;
     }
 
     try {
+      // First switch MetaMask to Monad
       await switchToMonad();
 
+      // Then request accounts
       const provider = new ethers.BrowserProvider(detectedProvider as unknown as ethers.Eip1193Provider);
       const accounts = await provider.send("eth_requestAccounts", []);
       setAccount(accounts[0]);
       setStatus("Connected");
 
       await fetchNetworkName();
+      await fetchNativeBalance(accounts[0]);  // Use the Monad provider if desired
     } catch (e) {
-      console.error(e);
+      console.error("Connect wallet error:", e);
     }
   }
+
+
+
+
 
   function isSwitchError(error: unknown): error is { code: number } {
     return typeof error === 'object' && error !== null && 'code' in error && typeof (error as any).code === 'number';
@@ -235,23 +245,31 @@ export default function Page() {
     }
   }
 
+
+
+
+
   async function fetchNetworkName() {
     try {
-      if (!window.ethereum) { setNetworkName("Unknown"); return; }
+      if (!window.ethereum) {
+        setNetworkName("Monad (via RPC)");
+        return;
+      }
       const provider = new ethers.BrowserProvider(window.ethereum);
       const chainIdHex = await provider.send("eth_chainId", []);
       const chainIdDecimal = parseInt(chainIdHex, 16);
 
-      if (chainIdDecimal === 10143) setNetworkName("Monad Testnet");
-      else {
-        const network = await provider.getNetwork();
-        setNetworkName(network.name || "Unknown");
-      }
-    } catch (error) {
-      console.error("Error fetching network name:", error);
+      if (chainIdDecimal === 10143 || chainIdDecimal === 0x279f) setNetworkName("Monad Testnet");
+      else setNetworkName("Ethereum"); // fallback
+    } catch (err) {
+      console.error(err);
       setNetworkName("Unknown");
     }
   }
+
+
+
+
 
   async function checkNFTOwnership(contractAddress: string, userAddress: string) {
     try {
