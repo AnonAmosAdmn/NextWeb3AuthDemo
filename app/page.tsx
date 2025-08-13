@@ -1,6 +1,4 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -8,21 +6,20 @@ import MetaMaskOnboarding from '@metamask/onboarding';
 import detectEthereumProvider from '@metamask/detect-provider';
 import { ethers } from 'ethers';
 
-// Add type declaration for window.ethereum
 declare global {
   interface Window {
     ethereum?: import('ethers').Eip1193Provider;
   }
 }
 
-// Minimal ERC-721 ABI for NFT ownership
+// Minimal ERC-721 ABI
 const ERC721_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
   "function name() view returns (string)"
 ];
 
-// Minimal ERC-20 ABI for token balance
+// Minimal ERC-20 ABI
 const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)",
@@ -30,12 +27,22 @@ const ERC20_ABI = [
   "function name() view returns (string)"
 ];
 
-// Contracts
+// Contracts & Providers
 const NFT_CONTRACT = "0x94475C04c5413c9FE532675fB921fC8b9a24475b";
 const ERC20_CONTRACT = "0xF58E363B23fC1BA88f8F75A6EAB57cF6ecaFae05";
 const PROJECT_ADDRESS = "0x81Dc669847E8e9Db863bf114a1481A49e5B4940D";
 const MONAD_RPC = "https://testnet-rpc.monad.xyz";
 const monadProvider = new ethers.JsonRpcProvider(MONAD_RPC);
+
+// Helper to format balances
+const formatBalance = (value: string, decimals = 3) =>
+  parseFloat(value).toFixed(decimals);
+
+// Centralized provider getter
+const getProvider = (): ethers.BrowserProvider | ethers.JsonRpcProvider => {
+  if (window.ethereum) return new ethers.BrowserProvider(window.ethereum);
+  return monadProvider;
+};
 
 export default function Page() {
   const [account, setAccount] = useState<string | null>(null);
@@ -46,21 +53,16 @@ export default function Page() {
   const [nftName, setNftName] = useState<string | null>(null);
   const [networkName, setNetworkName] = useState<string | null>(null);
   const [nativeBalance, setNativeBalance] = useState<string | null>(null);
-
-  // Combined auth state to preserve both signature and JWT info
   const [authState, setAuthState] = useState({
     nonce: null as string | null,
     signature: null as string | null,
     jwtToken: null as string | null,
-    jwtPayload: null as any,
+    jwtPayload: null as any
   });
-
-  // NFT ownership state
   const [nftOwnership, setNftOwnership] = useState<{ owns: boolean; balance: string; tokenIds: string[] }>({ owns: false, balance: "0", tokenIds: [] });
-  
-  // ERC20 balance state
   const [erc20Balance, setErc20Balance] = useState<{ symbol: string; balance: string } | null>(null);
 
+  // --- Effects ---
   useEffect(() => {
     setOnboarding(new MetaMaskOnboarding());
 
@@ -68,89 +70,47 @@ export default function Page() {
       const provider = await detectEthereumProvider({ silent: true });
       setIsMetaMaskInstalled(!!provider);
     };
-
     checkMetaMask();
 
-    (async () => {
+    const init = async () => {
       await checkAuth();
 
       const p = await detectEthereumProvider({ silent: true });
       if (p && p.on) {
-        p.on('accountsChanged', async (accounts) => {
-          const newAccount = accounts[0] || null;
-          setAccount(newAccount);
-          if (!newAccount) {
-            resetState();
-          } else {
-            setStatus(isSignedIn ? 'Authenticated!' : 'Connected');
-            await fetchNetworkName();
-            await fetchNativeBalance(newAccount);
-            await checkNFTOwnership(NFT_CONTRACT, newAccount);
-            await fetchERC20Balance(ERC20_CONTRACT, newAccount);
-          }
-        });
-
-        p.on('chainChanged', async () => {
-          await fetchNetworkName();
-        });
+        p.on('accountsChanged', async (accounts) => handleAccountChange(accounts[0] || null));
+        p.on('chainChanged', fetchNetworkName);
       }
-    })();
+    };
+    init();
   }, []);
 
-  function resetState() {
-    setStatus('');
+  // --- Handlers ---
+  const handleAccountChange = async (newAccount: string | null) => {
+    setAccount(newAccount);
+    if (!newAccount) resetState();
+    else {
+      setStatus(isSignedIn ? 'Authenticated!' : 'Connected');
+      await fetchNetworkName();
+      await fetchNativeBalance(newAccount);
+      await checkNFTOwnership(NFT_CONTRACT, newAccount);
+      await fetchERC20Balance(ERC20_CONTRACT, newAccount);
+    }
+  };
+
+  const resetState = () => {
+    setStatus('Logged out');
     setIsSignedIn(false);
     setNetworkName(null);
     setAuthState({ nonce: null, signature: null, jwtToken: null, jwtPayload: null });
     setNftOwnership({ owns: false, balance: "0", tokenIds: [] });
     setErc20Balance(null);
     setAccount(null);
-  }
+    setNativeBalance(null);
+    setNftName(null);
+  };
 
-
-
-  async function fetchNativeBalance(address: string) {
-    if (!address) return;
-    try {
-      // Use a JSON-RPC provider for Monad
-      const provider = new ethers.JsonRpcProvider(MONAD_RPC);
-      const balanceWei = await provider.getBalance(address);
-      const balance = ethers.formatEther(balanceWei);
-      setNativeBalance(parseFloat(balance).toFixed(3));
-    } catch (err) {
-      console.error("Error fetching native balance:", err);
-      setNativeBalance(null);
-    }
-  }
-
-
-
-
-  async function sendMonad() {
-    if (!account) return alert('Connect wallet first');
-
-    try {
-      const provider = new ethers.JsonRpcProvider(MONAD_RPC);
-      const signer = await provider.getSigner(account);
-
-      const tx = await signer.sendTransaction({
-        to: PROJECT_ADDRESS,
-        value: ethers.parseUnits("1", 18)
-      });
-
-      setStatus(`Transaction sent! Hash: ${tx.hash}`);
-      await tx.wait();
-      setStatus(`Transaction confirmed! Hash: ${tx.hash}`);
-    } catch (err: any) {
-      console.error(err);
-      setStatus(`Transaction failed: ${err.message || err}`);
-    }
-  }
-
-
-
-
-  async function checkAuth() {
+  // --- Check Authentication ---
+  const checkAuth = async () => {
     try {
       const r = await fetch('/api/auth/me', { credentials: 'include' });
       const j = await r.json();
@@ -158,232 +118,199 @@ export default function Page() {
       if (r.ok && j.authenticated) {
         setIsSignedIn(true);
         setAccount(j.address);
-        setAuthState({ ...authState, jwtToken: j.token, jwtPayload: j.payload });
+        setAuthState(prev => ({
+          ...prev,
+          jwtToken: j.token,
+          jwtPayload: j.payload
+        }));
         setStatus('Authenticated!');
         await fetchNetworkName();
         await checkNFTOwnership(NFT_CONTRACT, j.address);
         await fetchERC20Balance(ERC20_CONTRACT, j.address);
+        await fetchNativeBalance(j.address);
       } else {
         setIsSignedIn(false);
-        setAuthState({ ...authState, jwtToken: j.token, jwtPayload: null });
+        setAuthState(prev => ({ ...prev, jwtToken: j.token, jwtPayload: null }));
         if (account) {
           setStatus('Connected');
           await fetchNetworkName();
         } else {
-          setStatus('');
-          setNetworkName(null);
+          resetState();
         }
-        setAuthState({ ...authState, nonce: null, signature: null });
       }
-    } catch {
+    } catch (err) {
+      console.error('Error checking auth:', err);
       resetState();
     }
-  }
+  };
 
-
-
-
-
-  async function connectWallet() {
-    const detectedProvider = await detectEthereumProvider();
-    if (!detectedProvider) {
-      onboarding?.startOnboarding();
-      return;
-    }
-
+  // --- Network / Balance ---
+  const fetchNetworkName = async () => {
     try {
-      // First switch MetaMask to Monad
-      await switchToMonad();
-
-      // Then request accounts
-      const provider = new ethers.BrowserProvider(detectedProvider as unknown as ethers.Eip1193Provider);
-      const accounts = await provider.send("eth_requestAccounts", []);
-      setAccount(accounts[0]);
-      setStatus("Connected");
-
-      await fetchNetworkName();
-      await fetchNativeBalance(accounts[0]);  // Use the Monad provider if desired
-    } catch (e) {
-      console.error("Connect wallet error:", e);
-    }
-  }
-
-
-
-
-
-  function isSwitchError(error: unknown): error is { code: number } {
-    return typeof error === 'object' && error !== null && 'code' in error && typeof (error as any).code === 'number';
-  }
-
-  async function switchToMonad() {
-    const detectedProvider = await detectEthereumProvider();
-    if (!detectedProvider) return;
-    const provider = detectedProvider as any;
-
-    try {
-      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x279f" }] });
-    } catch (switchError) {
-      if (isSwitchError(switchError) && switchError.code === 4902) {
-        try {
-          await provider.request({
-            method: "wallet_addEthereumChain",
-            params: [{
-              chainId: "0x279f",
-              chainName: "Monad Testnet",
-              nativeCurrency: { name: "Monad", symbol: "MON", decimals: 18 },
-              rpcUrls: ["https://testnet-rpc.monad.xyz"],
-              blockExplorerUrls: ["https://explorer.monad.xyz"],
-            }],
-          });
-        } catch (addError) {
-          console.error("Failed to add Monad Testnet:", addError);
-        }
-      } else {
-        console.error("Failed to switch network:", switchError);
-      }
-    }
-  }
-
-
-
-
-
-  async function fetchNetworkName() {
-    try {
-      if (!window.ethereum) {
+      const provider = getProvider();
+      if (provider instanceof ethers.JsonRpcProvider) {
         setNetworkName("Monad (via RPC)");
         return;
       }
-      const provider = new ethers.BrowserProvider(window.ethereum);
       const chainIdHex = await provider.send("eth_chainId", []);
       const chainIdDecimal = parseInt(chainIdHex, 16);
-
-      if (chainIdDecimal === 10143 || chainIdDecimal === 0x279f) setNetworkName("Monad Testnet");
-      else setNetworkName("Ethereum"); // fallback
-    } catch (err) {
-      console.error(err);
+      setNetworkName(chainIdDecimal === 10143 || chainIdDecimal === 0x279f ? "Monad Testnet" : "Ethereum");
+    } catch {
       setNetworkName("Unknown");
     }
-  }
+  };
 
-
-
-
-
-  async function checkNFTOwnership(contractAddress: string, userAddress: string) {
+  const fetchNativeBalance = async (address: string) => {
     try {
-      if (!window.ethereum) throw new Error("Ethereum provider not found");
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const contract = new ethers.Contract(contractAddress, ERC721_ABI, provider);
+      const provider = getProvider();
+      const balanceWei = await provider.getBalance(address);
+      setNativeBalance(formatBalance(ethers.formatEther(balanceWei)));
+    } catch (err) {
+      console.error("Error fetching native balance:", err);
+      setNativeBalance(null);
+    }
+  };
 
-      // Fetch NFT name
+  // --- NFT & ERC20 ---
+  const checkNFTOwnership = async (contractAddress: string, userAddress: string) => {
+    try {
+      const provider = getProvider();
+      const contract = new ethers.Contract(contractAddress, ERC721_ABI, provider);
       const name = await contract.name();
       setNftName(name);
-
       const balance = await contract.balanceOf(userAddress);
       const tokenIds: string[] = [];
-
-      if (balance > 0) {
-        for (let i = 0; i < balance; i++) {
-          try {
-            const tokenId = await contract.tokenOfOwnerByIndex(userAddress, i);
-            tokenIds.push(tokenId.toString());
-          } catch { break; }
-        }
+      for (let i = 0; i < balance; i++) {
+        try {
+          const tokenId = await contract.tokenOfOwnerByIndex(userAddress, i);
+          tokenIds.push(tokenId.toString());
+        } catch { break; }
       }
-
       setNftOwnership({ owns: balance > 0, balance: balance.toString(), tokenIds });
     } catch (err) {
       console.error("Error checking NFT ownership:", err);
       setNftOwnership({ owns: false, balance: "0", tokenIds: [] });
       setNftName(null);
     }
-  }
+  };
 
-  async function fetchERC20Balance(contractAddress: string, userAddress: string) {
-    if (!window.ethereum) {
-      console.error("Ethereum provider not found");
-      setErc20Balance(null);
-      return;
-    }
-
+  const fetchERC20Balance = async (contractAddress: string, userAddress: string) => {
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = getProvider();
       const contract = new ethers.Contract(contractAddress, ERC20_ABI, provider);
-
       const [balanceRaw, decimals, symbol] = await Promise.all([
         contract.balanceOf(userAddress),
         contract.decimals(),
         contract.symbol(),
       ]);
-
-      const balanceFormatted = parseFloat(ethers.formatUnits(balanceRaw, decimals)).toFixed(3);
-      setErc20Balance({ symbol, balance: balanceFormatted });
+      setErc20Balance({ symbol, balance: formatBalance(ethers.formatUnits(balanceRaw, decimals)) });
     } catch (err) {
       console.error("Error fetching ERC20 balance:", err);
       setErc20Balance(null);
     }
-  }
+  };
 
+  // --- Wallet / Auth ---
+  const connectWallet = async () => {
+    const detectedProvider = await detectEthereumProvider();
+    if (!detectedProvider) return onboarding?.startOnboarding();
 
-  async function signIn() {
-    if (!account) return alert('Connect wallet first');
-
-    setStatus('Requesting nonce token...');
-    const r = await fetch(`/api/auth/nonce?address=${account}`);
-    if (!r.ok) { setStatus('Failed to get nonce'); return; }
-
-    const { nonceToken, message } = await r.json();
-    setAuthState(prev => ({ ...prev, nonce: message }));
-
-    setStatus('Signing message...');
-    if (!window.ethereum) { setStatus('Ethereum provider not found'); return; }
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const signer = await provider.getSigner();
-    const sig = await signer.signMessage(message);
-    setAuthState(prev => ({ ...prev, signature: sig }));
-
-    setStatus('Verifying signature on server...');
-    const v = await fetch('/api/auth/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ address: account, signature: sig, nonceToken }),
-    });
-
-    if (v.ok) {
-      const json = await v.json();
-
-      // Update everything in one go
-      const newAddress = json.address || account;
-      setAccount(newAddress);
-      setAuthState({
-        nonce: message,
-        signature: sig,
-        jwtToken: json.token,
-        jwtPayload: json.payload,
-      });
-      setIsSignedIn(true);
-      setStatus('Authenticated!');
-
-      // Fetch NFT & ERC20 balances using the newly authenticated address
-      await checkNFTOwnership(NFT_CONTRACT, newAddress);
-      await fetchERC20Balance(ERC20_CONTRACT, newAddress);
-      await fetchNativeBalance(newAddress);
-    } else {
-      const err = await v.json();
-      setStatus('Auth failed: ' + (err?.error || v.statusText));
-      resetState();
+    try {
+      await switchToMonad();
+      const provider = new ethers.BrowserProvider(detectedProvider as any);
+      const accounts = await provider.send("eth_requestAccounts", []);
+      handleAccountChange(accounts[0]);
+    } catch (err) {
+      console.error("Connect wallet error:", err);
     }
-  }
+  };
 
+  const isSwitchError = (error: unknown): error is { code: number } =>
+    typeof error === 'object' && error !== null && 'code' in error && typeof (error as any).code === 'number';
 
-  async function logout() {
+  const switchToMonad = async () => {
+    const detectedProvider = await detectEthereumProvider();
+    if (!detectedProvider) return;
+    const provider = detectedProvider as any;
+    try {
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x279f" }] });
+    } catch (switchError) {
+      if (isSwitchError(switchError) && switchError.code === 4902) {
+        await provider.request({
+          method: "wallet_addEthereumChain",
+          params: [{
+            chainId: "0x279f",
+            chainName: "Monad Testnet",
+            nativeCurrency: { name: "Monad", symbol: "MON", decimals: 18 },
+            rpcUrls: [MONAD_RPC],
+            blockExplorerUrls: ["https://explorer.monad.xyz"],
+          }],
+        });
+      } else console.error("Failed to switch network:", switchError);
+    }
+  };
+
+  const signIn = async () => {
+    if (!account) return alert('Connect wallet first');
+    setStatus('Signing in...');
+
+    try {
+      const r = await fetch(`/api/auth/nonce?address=${account}`);
+      const { nonceToken, message } = await r.json();
+      setAuthState(prev => ({ ...prev, nonce: message }));
+
+      const provider = getProvider();
+      if (!(provider instanceof ethers.BrowserProvider)) throw new Error("No signer available");
+      const signer = await provider.getSigner();
+      const sig = await signer.signMessage(message);
+
+      const v = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ address: account, signature: sig, nonceToken }),
+      });
+
+      if (v.ok) {
+        const json = await v.json();
+        setAuthState({ nonce: message, signature: sig, jwtToken: json.token, jwtPayload: json.payload });
+        setIsSignedIn(true);
+        setStatus('Authenticated!');
+        await checkNFTOwnership(NFT_CONTRACT, account);
+        await fetchERC20Balance(ERC20_CONTRACT, account);
+        await fetchNativeBalance(account);
+      } else {
+        setStatus('Auth failed');
+        resetState();
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus('Sign-in failed');
+    }
+  };
+
+  const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     resetState();
-    setStatus('Logged out');
-  }
+  };
+
+  const sendMonad = async () => {
+    if (!account) return alert('Connect wallet first');
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum!);
+      const signer = await provider.getSigner();
+      const tx = await signer.sendTransaction({
+        to: PROJECT_ADDRESS,
+        value: ethers.parseUnits("1", 18)
+      });
+      setStatus(`Transaction sent! Hash: ${tx.hash}`);
+      await tx.wait();
+      setStatus(`Transaction confirmed! Hash: ${tx.hash}`);
+    } catch (err: any) {
+      console.error(err);
+      setStatus(`Transaction failed: ${err.message || err}`);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
@@ -407,6 +334,12 @@ export default function Page() {
 
       <main className="container mx-auto p-6 flex-grow">
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg max-w-xl mx-auto space-y-6">
+
+          <div className="text-sm text-gray-400">
+            <strong>Status:</strong>
+            <p className="mt-1 min-h-[24px] whitespace-pre-wrap">{status || 'Logged out'}</p>
+          </div>
+
           {networkName && (
             <section className="bg-gray-700 p-4 rounded-lg">
               <h2 className="text-lg font-semibold mb-2">Network Information</h2>
@@ -474,10 +407,6 @@ export default function Page() {
             </section>
           )}
 
-          <div className="text-sm text-gray-400">
-            <strong>Status:</strong>
-            <p className="mt-1 min-h-[24px] whitespace-pre-wrap">{status || 'Logged out'}</p>
-          </div>
         </div>
       </main>
     </div>
