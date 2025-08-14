@@ -335,10 +335,16 @@ export default function Page() {
       <main className="container mx-auto p-6 flex-grow">
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg max-w-xl mx-auto space-y-6">
 
-          <div className="text-sm text-gray-400">
-            <strong>Status:</strong>
+
+
+
+          <section className="bg-gray-700 p-4 rounded-lg">
+            <h2 className="text-lg font-semibold mb-2">Status: </h2>
             <p className="mt-1 min-h-[24px] whitespace-pre-wrap">{status || 'Logged out'}</p>
-          </div>
+          </section>
+
+
+
 
           {networkName && (
             <section className="bg-gray-700 p-4 rounded-lg">
